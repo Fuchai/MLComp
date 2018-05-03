@@ -112,10 +112,10 @@ val pos = ref 1
 val error = fn x => TextIO.output(TextIO.stdErr, x ^ "\n")
 val eof = fn () => Tokens.EOF(!pos, !pos)
 
-fun countnewlines s = 
+fun countnewlines s =
     let val lst = explode s
         fun count (c:char) nil = 0
-          | count c (h::t) = 
+          | count c (h::t) =
             let val tcount = count c t
             in
               if c = h then 1+tcount else tcount
@@ -256,7 +256,7 @@ fun yyAction29 (strm, lastMatch : yymatch) = let
       val yytext = yymktext(strm)
       in
         yystrm := strm;
-        (let val tok = String.implode (List.map (Char.toLower) 
+        (let val tok = String.implode (List.map (Char.toLower)
              (String.explode yytext))
     in
       if      tok="let" then Tokens.Let(!pos,!pos)
@@ -279,7 +279,9 @@ fun yyAction29 (strm, lastMatch : yymatch) = let
       else if tok="raise" then Tokens.Raise(!pos,!pos)
       else if tok="true" then Tokens.True(!pos,!pos)
       else if tok="false" then Tokens.False(!pos,!pos)
-      else Tokens.Id(yytext,!pos,!pos) 
+      else if tok="case" then Tokens.Case(!pos,!pos)
+      else if tok="of" then Tokens.Of(!pos,!pos)
+      else Tokens.Id(yytext,!pos,!pos)
     end)
       end
 fun yyAction30 (strm, lastMatch : yymatch) = let
@@ -684,7 +686,6 @@ end
         end
     in
     fun makeLexer yyinputN = mk (yyInput.mkStream yyinputN)
-    fun makeLexer' ins = mk (yyInput.mkStream ins)
     end
 
   end

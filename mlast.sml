@@ -1,4 +1,4 @@
-structure MLAS = 
+structure MLAS =
 struct
 
 datatype
@@ -16,6 +16,7 @@ datatype
         | raisexp of exp
         | handlexp of exp * match list
         | ifthen of exp * exp * exp
+        | caseof of exp * match list
         | whiledo of exp * exp
         | func of int * match list
         | negate of exp
@@ -36,7 +37,5 @@ datatype
     dec = bindval of pat * exp
         | bindvalrec of pat * exp
         | funmatch of string * match list
-        | funmatches of (string * match list) list 
+        | funmatches of (string * match list) list
 end;
-
-

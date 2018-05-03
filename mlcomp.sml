@@ -112,6 +112,7 @@ open MLAS;
        | nameOf(expsequence(L)) = "expsequence"
        | nameOf(letdec(L1,L2)) = "letdec"
        | nameOf(handlexp(e,L)) = "handlexp"
+       | nameOf(caseof(e1,L)) = "caseof"
        | nameOf(raisexp(e)) = "raisexp"
        | nameOf(negate(e)) = "negate"
        | nameOf(ifthen(e1,e2,e3)) = "ifthen"
@@ -176,13 +177,15 @@ open MLAS;
                       writeExp(indent,exp);
                       print(")"))
 
-               | writeExp(indent,negate(exp)) =
-                 (print("negate(");
-                  writeExp(indent,exp);
-                  print(")"))
-
                | writeExp(indent,handlexp(exp,L)) =
                      (println(indent^"handlexp(");
+                      writeExp(indent^"   ",exp);
+                      println("\n"^indent^", [");
+                      printList(writeMatch,indent^"   ",L);
+                      println(indent^"])"))
+
+               | writeExp(indent,caseof(exp,L)) =
+                     (println(indent^"caseof(");
                       writeExp(indent^"   ",exp);
                       println("\n"^indent^", [");
                       printList(writeMatch,indent^"   ",L);
@@ -297,6 +300,9 @@ open MLAS;
      fun constants(ast) =
          let fun decconsts(bindval(_,exp)) = con exp
                | decconsts(bindvalrec(idpat(name),func(idnum,L))) = ["code("^name^")"]
+
+               (*| decconsts(bindvalrec(wildcardpat)) = []*)
+
                | decconsts(bindvalrec(_,_)) =
                  (TextIO.output(TextIO.stdOut,"val rec construct must be val rec id = (fn <x> => ...)\n");
                   raise Unimplemented)
@@ -311,12 +317,13 @@ open MLAS;
                | con(expsequence(L)) = (List.foldr (fn (x,y) => (con x) @ y) [] L)
                | con(letdec(d,L2)) = (decconsts d) @ (List.foldr (fn (x,y) => (con x) @ y) [] L2)
                | con(apply(t1,t2)) = (con t1) @ (con t2)
+               | con(ifthen(e1,e2,e3)) = (((con e1) @ (con e2)) @ (con e3))
                | con(raisexp(t)) = (con t)
                | con(negate(t)) = (con t)
-               | con(ifthen(t1,t2,t3)) = (con t1) @ (con t2) @ (con t3)
                | con(listcon(L)) = (List.foldr (fn (x,y) => (con x)@y) [] L)
                | con(func(idnum,matchlist)) = ["code(anon@"^Int.toString(idnum)^")"]
                | con(handlexp(t1,L)) = (con t1) @ ((List.foldr (fn (match(pat,exp),y) => (patConsts pat) @ (con exp) @ y) []) L)
+               | con(caseof(e1,L)) = (con e1) @ ((List.foldr (fn (match(pat,exp),y) => (patConsts pat) @ (con exp) @ y) []) L)
                | con(tuplecon(L)) = List.foldr (fn (x,y) => (con x) @ y) [] L
 
                | con(str(s)) = [s]
@@ -352,7 +359,9 @@ open MLAS;
        | patBindings(boolpat(v),scope) = []
        | patBindings(strpat(v),scope) = []
        | patBindings(idpat(name),scope) = [(name,name^"@"^Int.toString(scope))]
+       | patBindings(wildcardpat,scope) = []
        | patBindings(infixpat("::",pat1,pat2),scope) = (patBindings(pat1,scope)) @ (patBindings(pat2,scope))
+       | patBindings(listpat(L),scope) = List.foldr (fn (x,y) => patBindings(x,scope)@y) [] L
        | patBindings(tuplepat(L),scope) = List.foldr (fn (x,y) => patBindings(x,scope)@y) [] L
        | patBindings(_,scope) =
          (TextIO.output(TextIO.stdOut, "\nAttempt to gather locals for unsupported pattern!\n");
@@ -384,6 +393,7 @@ open MLAS;
                | bindingsOf(listcon(L),bindings,scope) = (List.map (fn x => (bindingsOf(x,bindings,scope))) L; ())
                | bindingsOf(tuplecon(L),bindings,scope) = (List.map (fn x => (bindingsOf(x,bindings,scope))) L; ())
                | bindingsOf(apply(exp1,exp2),bindings,scope) = (bindingsOf(exp1,bindings,scope); bindingsOf(exp2,bindings,scope))
+               | bindingsOf(ifthen(exp1,exp2,exp3),bindings,scope) = (bindingsOf(exp1,bindings,scope); bindingsOf(exp2,bindings,scope); bindingsOf(exp3,bindings,scope))
                | bindingsOf(infixexp(operator,exp1,exp2),bindings,scope) = (bindingsOf(exp1,bindings,scope); bindingsOf(exp2,bindings,scope))
                | bindingsOf(handlexp(exp,L),bindings,scope) =
                  (bindingsOf(exp,bindings,scope);
@@ -395,8 +405,17 @@ open MLAS;
                      end) L;
                   ())
 
+               | bindingsOf(caseof(exp,L),bindings,scope) =
+                 (bindingsOf(exp,bindings,scope);
+                  List.map (fn match(pat,exp) =>
+                     let val patBs = patBindings(pat,scope+1)
+                     in
+                       bindingsOf(exp,patBs@bindings,scope+1);
+                       List.map (fn b => addIt(b,theBindings)) patBs
+                     end) L;
+                  ())
+
                | bindingsOf(raisexp(exp),bindings,scope) = bindingsOf(exp,bindings,scope)
-               | bindingsOf(ifthen(exp1,exp2,exp3), bindings, scope) = (bindingsOf(exp1, bindings, scope); bindingsOf(exp2, bindings, scope); bindingsOf(exp3,bindings,scope))
                | bindingsOf(negate(exp),bindings,scope) = bindingsOf(exp,bindings,scope)
                | bindingsOf(expsequence(L),bindings,scope) = (List.map (fn x => (bindingsOf(x,bindings,scope))) L; ())
                | bindingsOf(letdec(d,L2),bindings,scope) =
@@ -452,6 +471,8 @@ open MLAS;
                                   end) L;
                      [addIt((name,name),theBindings)]
                  end
+
+               (*| decbindingsOf(bindvalrec(wildcardpat,exp),bindings,scope) = []*)
 
                | decbindingsOf(bindvalrec(_,exp),bindings,scope) =
                  (print "This should never happen";
@@ -641,6 +662,9 @@ open MLAS;
        | codegen(id(name),outFile,indent,consts,locals,freeVars,cellVars,globals,env,globalBindings,scope) =
          load(name,outFile,indent,locals,freeVars,cellVars,globals,env)
 
+       (* | codegen(wildcard,outFile,indent,consts,locals,freeVars,cellVars,globals,env,globalBindings,scope) =
+         TextIO.output(outFile,indent^"POP_TOP \n") *)
+
        | codegen(apply(t1,t2),outFile,indent,consts,locals,freeVars,cellVars,globals,env,globalBindings,scope) =
          let val _ = codegen(t1,outFile,indent,consts,locals,freeVars,cellVars,globals,env,globalBindings,scope)
              val _ = codegen(t2,outFile,indent,consts,locals,freeVars,cellVars,globals,env,globalBindings,scope)
@@ -648,12 +672,21 @@ open MLAS;
            TextIO.output(outFile,indent^"CALL_FUNCTION 1\n")
          end
 
-       | codegen(listcon(L),outFile,indent,consts,locals,freeVars,cellVars,globals,env,globalBindings,scope) =
-         let val size = length(L)
+        | codegen(ifthen(e1,e2,e3),outFile,indent,consts,locals,freeVars,cellVars,globals,env,globalBindings,scope) =
+         let val _ = codegen(e1,outFile,indent,consts,locals,freeVars,cellVars,globals,env,globalBindings,scope)
+             val l0 = nextLabel()
+             val l1 = nextLabel()
          in
-           List.map (fn x => codegen(x,outFile,indent,consts,locals,freeVars,cellVars,globals,env,globalBindings,scope)) L;
-           TextIO.output(outFile,indent^"BUILD_FUNLIST "^Int.toString(size)^"\n")
+           TextIO.output(outFile,indent^"POP_JUMP_IF_FALSE "^ l0 ^"\n");
+           codegen(e2,outFile,indent,consts,locals,freeVars,cellVars,globals,env,globalBindings,scope);
+           TextIO.output(outFile,indent^"JUMP_FORWARD "^ l1 ^"\n");
+           TextIO.output(outFile,indent^l0^":\n");
+           codegen(e3,outFile,indent,consts,locals,freeVars,cellVars,globals,env,globalBindings,scope);
+           TextIO.output(outFile,indent^l1^":\n")
          end
+
+
+
 
        | codegen(infixexp("@",t1,t2),outFile,indent,consts,locals,freeVars,cellVars,globals,env,globalBindings,scope) =
          let val _ = codegen(t1,outFile,indent,consts,locals,freeVars,cellVars,globals,env,globalBindings,scope)
@@ -714,29 +747,29 @@ open MLAS;
            TextIO.output(outFile,indent^"COMPARE_OP "^index^"\n")
          end
 
-        | codegen(infixexp(">=",t1,t2),outFile,indent,consts,locals,freeVars,cellVars,globals,env,globalBindings,scope) =
-        let val _ = codegen(t1,outFile,indent,consts,locals,freeVars,cellVars,globals,env,globalBindings,scope)
-           val _ = codegen(t2,outFile,indent,consts,locals,freeVars,cellVars,globals,env,globalBindings,scope)
-           val index = lookupIndex(">=",cmp_op)
-        in
-         TextIO.output(outFile,indent^"COMPARE_OP "^index^"\n")
-        end
+       |codegen(infixexp(">=",t1,t2),outFile,indent,consts,locals,freeVars,cellVars,globals,env,globalBindings,scope) =
+         let val _ = codegen(t1,outFile,indent,consts,locals,freeVars,cellVars,globals,env,globalBindings,scope)
+             val _ = codegen(t2,outFile,indent,consts,locals,freeVars,cellVars,globals,env,globalBindings,scope)
+             val index = lookupIndex(">=",cmp_op)
+         in
+           TextIO.output(outFile,indent^"COMPARE_OP "^index^"\n")
+         end
 
-        | codegen(infixexp("<=",t1,t2),outFile,indent,consts,locals,freeVars,cellVars,globals,env,globalBindings,scope) =
-        let val _ = codegen(t1,outFile,indent,consts,locals,freeVars,cellVars,globals,env,globalBindings,scope)
-           val _ = codegen(t2,outFile,indent,consts,locals,freeVars,cellVars,globals,env,globalBindings,scope)
-           val index = lookupIndex("<=",cmp_op)
-        in
-         TextIO.output(outFile,indent^"COMPARE_OP "^index^"\n")
-        end
+       |codegen(infixexp("<=",t1,t2),outFile,indent,consts,locals,freeVars,cellVars,globals,env,globalBindings,scope) =
+         let val _ = codegen(t1,outFile,indent,consts,locals,freeVars,cellVars,globals,env,globalBindings,scope)
+             val _ = codegen(t2,outFile,indent,consts,locals,freeVars,cellVars,globals,env,globalBindings,scope)
+             val index = lookupIndex("<=",cmp_op)
+         in
+           TextIO.output(outFile,indent^"COMPARE_OP "^index^"\n")
+         end
 
-        | codegen(infixexp("<>",t1,t2),outFile,indent,consts,locals,freeVars,cellVars,globals,env,globalBindings,scope) =
-        let val _ = codegen(t1,outFile,indent,consts,locals,freeVars,cellVars,globals,env,globalBindings,scope)
-           val _ = codegen(t2,outFile,indent,consts,locals,freeVars,cellVars,globals,env,globalBindings,scope)
-           val index = lookupIndex(">=",cmp_op)
-        in
-         TextIO.output(outFile,indent^"COMPARE_OP "^index^"\n")
-        end
+       |codegen(infixexp("<>",t1,t2),outFile,indent,consts,locals,freeVars,cellVars,globals,env,globalBindings,scope) =
+         let val _ = codegen(t1,outFile,indent,consts,locals,freeVars,cellVars,globals,env,globalBindings,scope)
+             val _ = codegen(t2,outFile,indent,consts,locals,freeVars,cellVars,globals,env,globalBindings,scope)
+             val index = lookupIndex("<>",cmp_op)
+         in
+           TextIO.output(outFile,indent^"COMPARE_OP "^index^"\n")
+         end
 
        | codegen(raisexp(t),outFile,indent,consts,locals,freeVars,cellVars,globals,env,globalBindings,scope) =
          let val _ = codegen(t,outFile,indent,consts,locals,freeVars,cellVars,globals,env,globalBindings,scope)
@@ -786,14 +819,73 @@ open MLAS;
            TextIO.output(outFile,L2^":\n")
          end
 
+       | codegen(caseof(t1,L),outFile,indent,consts,locals,freeVars,cellVars,globals,env,globalBindings,scope) =
+         let val L0 = nextLabel()
+             val L1 = nextLabel()
+             val L2 = nextLabel()
+             val excIndex = lookupIndex("Exception",globals)
+             val excmpIdx = lookupIndex("excmatch",cmp_op)
+         in
+           TextIO.output(outFile,indent^"SETUP_EXCEPT "^L0^"\n");
+           codegen(t1,outFile,indent,consts,locals,freeVars,cellVars,globals,env,globalBindings,scope);
+           TextIO.output(outFile,indent^"POP_BLOCK\n");
+           TextIO.output(outFile,indent^"JUMP_FORWARD "^L2^"\n");
+           TextIO.output(outFile,L0^":\n");
+           TextIO.output(outFile,indent^"DUP_TOP\n");
+           TextIO.output(outFile,indent^"LOAD_GLOBAL "^excIndex^"\n");
+           TextIO.output(outFile,indent^"COMPARE_OP "^excmpIdx^"\n");
+           TextIO.output(outFile,indent^"POP_JUMP_IF_FALSE "^L1^"\n");
+           (* At this point the stack has Exception, argument to Exception, and traceback on the stack.
+              We will throw away the argument and the traceback *)
+           TextIO.output(outFile,indent^"ROT_TWO\n");
+           TextIO.output(outFile,indent^"POP_TOP\n");
+           TextIO.output(outFile,indent^"ROT_TWO\n");
+           TextIO.output(outFile,indent^"POP_TOP\n");
+
+           List.map (fn (match(pat,exp)) =>
+                      let val endpatternlab = nextLabel()
+                      in
+                        TextIO.output(outFile,indent^"DUP_TOP\n");
+                        let val newbindings = patmatch(pat,outFile,indent,consts,locals,freeVars,cellVars,globals,env,scope+1,endpatternlab)
+                        in
+                          TextIO.output(outFile,indent^"POP_TOP\n");
+                          codegen(exp,outFile,indent,consts,locals,freeVars,cellVars,globals,newbindings@env,globalBindings,scope+1);
+                          TextIO.output(outFile,indent^"JUMP_FORWARD "^L2^"\n");
+                          TextIO.output(outFile,endpatternlab^":\n")
+                        end
+                      end) L;
+           (* Exception pattern was not matched so reraise it *)
+           TextIO.output(outFile,L1^":\n");
+           TextIO.output(outFile,indent^"RAISE_VARARGS 1\n");
+           (* Otherwise, we continue on from here *)
+           TextIO.output(outFile,L2^":\n")
+         end
+
+       | codegen(negate(e),outFile,indent,consts,locals,freeVars,cellVars,globals,env,globalBindings,scope) =
+          let val index = lookupIndex("0",consts)
+          in
+            TextIO.output(outFile, indent ^ "LOAD_CONST "^index^ "\n");
+            codegen(e,outFile,indent,consts,locals,freeVars,cellVars,globals,env,globalBindings,scope);
+            TextIO.output(outFile,indent^"BINARY_SUBTRACT\n")
+          end
        | codegen(letdec(d,L2),outFile,indent,consts,locals,freeVars,cellVars,globals,env,globalBindings,scope) =
          let val newbindings = decgen(d,outFile,indent,consts,locals,freeVars,cellVars,globals,env,globalBindings,scope)
          in
            codegenseq(L2,outFile,indent,consts,locals,freeVars,cellVars,globals,newbindings@env,globalBindings,scope+1)
          end
 
+
+
        | codegen(expsequence(L),outFile,indent,consts,locals,freeVars,cellVars,globals,env,globalBindings,scope) =
            codegenseq(L,outFile,indent,consts,locals,freeVars,cellVars,globals,env,globalBindings,scope)
+
+       | codegen(listcon(L),outFile,indent,consts,locals,freeVars,cellVars,globals,env,globalBindings,scope) =
+         let val size = length(L)
+         in
+           codegenlist(L,outFile,indent,consts,locals,freeVars,cellVars,globals,env,globalBindings,scope);
+           (*List.map (fn x => codegen(x,outFile,indent,consts,locals,freeVars,cellVars,globals,env,globalBindings,scope)) L;*)
+           TextIO.output(outFile,indent^"BUILD_FUNLIST "^Int.toString(size)^"\n")
+         end
 
        | codegen(tuplecon(L),outFile,indent,consts,locals,freeVars,cellVars,globals,env,globalBindings,scope) =
          let val size = List.length(L)
@@ -809,29 +901,6 @@ open MLAS;
          in
            makeFunction(name,L,outFile,indent,consts,locals,freeVars,cellVars,env,globalBindings,scope)
          end
-
-       | codegen(negate(e),outFile,indent,consts,locals,freeVars,cellVars,globals,env,globalBindings,scope) =
-         let val index = lookupIndex("0",consts)
-         in
-           TextIO.output(outFile,indent^"LOAD_CONST "^index^"\n");
-           codegen(e,outFile,indent,consts,locals,freeVars,cellVars,globals,env,globalBindings,scope);
-           TextIO.output(outFile, indent^"BINARY_SUBTRACT\n")
-         end
-
-       | codegen(ifthen(e_if, e_then, e_else),outFile,indent,consts,locals,freeVars,cellVars,globals,env,globalBindings,scope) =
-          let val then_label=nextLabel()
-              val else_label=nextLabel()
-          in
-              (
-              codegen(e_if,outFile,indent,consts,locals,freeVars,cellVars,globals,env,globalBindings,scope);
-              TextIO.output(outFile,indent^"POP_JUMP_IF_FALSE "^else_label^"\n");
-              codegen(e_then,outFile,indent,consts,locals,freeVars,cellVars,globals,env,globalBindings,scope);
-              TextIO.output(outFile,indent^"JUMP_FORWARD "^then_label^"\n");
-              TextIO.output(outFile,else_label^": \n");
-              codegen(e_else,outFile,indent,consts,locals,freeVars,cellVars,globals,env,globalBindings,scope);
-              TextIO.output(outFile,then_label^": \n")
-              )
-          end
 
        | codegen(other,outFile,indent,consts,locals,freeVars,cellVars,globals,env,globalBindings,scope) =
          (TextIO.output(TextIO.stdOut, "\nAttempt to compile expression not currently supported!\n");
@@ -864,6 +933,8 @@ open MLAS;
            [(name,variable)]
          end
 
+       (*| decgen(bindval(wildcardpat,exp),outFile,indent,consts,locals,freeVars,cellVars,globals,env,globalBindings,scope) = []*)
+
        | decgen(bindval(pat,exp),outFile,indent,consts,locals,freeVars,cellVars,globals,env,globalBindings,scope) =
          let val exceptionidx = lookupIndex("Exception",globals)
              val mismatch = lookupIndex("'Match Not Found'",consts)
@@ -890,6 +961,8 @@ open MLAS;
            [(name,targetName)]
          end
 
+       (*| decgen(bindvalrec(wildcardpat,exp),outFile,indent,consts,locals,freeVars,cellVars,globals,env,globalBindings,scope) = []*)
+
        | decgen(bindvalrec(pat,exp),outFile,indent,consts,locals,freeVars,cellVars,globals,env,globalBindings,scope) =
          (TextIO.output(TextIO.stdOut,"Use of val rec without an identifier pattern not allowed.\n");
           raise Unimplemented)
@@ -905,7 +978,7 @@ open MLAS;
 
 
      (* The patmatch function is given a label to jump to if the pattern does not match. For any
-        pattern, the generated code checks to see if the value on the top of the stack will
+        pattern, the generated code checks to see if the value on the stop of the stack will
         match the pattern. If it does, the variables for the pattern bindings are initialized with the
         appropriate values for the pattern.
 
@@ -942,6 +1015,11 @@ open MLAS;
            []
          end
 
+       | patmatch(wildcardpat,outFile,indent,consts,locals,freeVars,cellVars,globals,env,scope,label) =
+          (TextIO.output(outFile,indent^"POP_TOP \n");
+          [])
+
+
        | patmatch(boolpat(v), outFile,indent,consts,locals,freeVars,cellVars,globals,env,scope,label) =
          let val value = if v = "true" then "True" else "False"
              val boolIndex = lookupIndex(value,consts)
@@ -970,6 +1048,14 @@ open MLAS;
            [(name,variable)]
          end
 
+<<<<<<< HEAD
+<<<<<<< HEAD
+       (*| patmatch(wildcardpat,outFile,indent,consts,locals,freeVars,cellVars,globals,env,scope,label) = []*)
+
+=======
+>>>>>>> parent of 31a70a4... working
+=======
+>>>>>>> parent of 31a70a4... working
        | patmatch(infixpat("::",pat1,pat2),outFile,indent,consts,locals,freeVars,cellVars,globals,env,scope,label) =
          let val zeroIndex = lookupIndex("0",consts)
              val lenIndex = lookupIndex("len",globals)
@@ -994,6 +1080,16 @@ open MLAS;
          (TextIO.output(outFile,indent^"SELECT_TUPLE "^Int.toString(length(L))^"\n");
           List.foldl (fn (x,y) => patmatch(x,outFile,indent,consts,locals,freeVars,cellVars,globals,env,scope,label) @ y) [] L)
 
+<<<<<<< HEAD
+<<<<<<< HEAD
+       | patmatch(listpat(L),outFile,indent,consts,locals,freeVars,cellVars,globals,env,scope,label) =
+         (TextIO.output(outFile,indent^"SELECT_FUNLIST\n");
+          List.foldl (fn (x,y) => patmatch(x,outFile,indent,consts,locals,freeVars,cellVars,globals,env,scope,label) @ y) [] L)
+
+=======
+>>>>>>> parent of 31a70a4... working
+=======
+>>>>>>> parent of 31a70a4... working
        | patmatch(_,outFile,indent,consts,locals,freeVars,cellVars,globals,env,scope,label) =
          (TextIO.output(TextIO.stdOut, "\nAttempt to compile unsupported pattern match!\n");
           raise Unimplemented)
@@ -1066,11 +1162,12 @@ open MLAS;
                | functions(listcon(L)) = (List.map (fn x => (functions x)) L; ())
                | functions(tuplecon(L)) = (List.map (fn x => (functions x)) L; ())
                | functions(apply(exp1,exp2)) = (functions exp1;functions exp2)
+               | functions(ifthen(exp1,exp2,exp3)) = (functions exp1;functions exp2;functions exp3)
                | functions(infixexp(operator,exp1,exp2)) = (functions exp1;functions exp2)
                | functions(handlexp(exp,L)) = (functions exp; List.map (fn (match(pat,exp)) => functions exp) L; ())
+               | functions(caseof(exp,L)) = (functions exp; List.map (fn (match(pat,exp)) => functions exp) L; ())
                | functions(raisexp(e)) = (functions e)
                | functions(negate(e)) = (functions e)
-               | functions(ifthen(e1,e2,e3))=(functions e1; functions e2; functions e3)
 
                | functions(expsequence(L)) = (List.map (fn x => (functions x)) L; ())
                | functions(letdec(d,L2)) =
@@ -1096,6 +1193,8 @@ open MLAS;
                  in
                    nestedfun(targetName,L,outFile,indent,globals,(name,targetName)::env,globalBindings,scope)
                  end
+
+               (*| dec(bindvalrec(wildcardpat,func(idnum,L))) = []*)
 
                | dec(bindvalrec(_,_)) =
                  (TextIO.output(TextIO.stdOut,"val rec construct must be val rec id = (fn <x> => ...)\n");
@@ -1166,12 +1265,12 @@ open MLAS;
                | functions(listcon(L)) = (List.map (fn x => (functions x)) L; ())
                | functions(tuplecon(L)) = (List.map (fn x => (functions x)) L; ())
                | functions(apply(exp1,exp2)) = (functions exp1;functions exp2)
+               | functions(ifthen(exp1,exp2,exp3)) = (functions exp1;functions exp2;functions exp3)
                | functions(infixexp(operator,exp1,exp2)) = (functions exp1;functions exp2)
                | functions(handlexp(exp,L)) = (functions exp;List.map (fn (match(pat,exp)) => functions exp) L; ())
+               | functions(caseof(exp,L)) = (functions exp;List.map (fn (match(pat,exp)) => functions exp) L; ())
                | functions(raisexp(e)) = (functions e)
                | functions(negate(e)) = (functions e)
-               | functions(ifthen(e1,e2,e3)) =  (functions e1; functions e2; functions e3)
-
 
                | functions(expsequence(L)) = (List.map (fn x => (functions x)) L; ())
 
@@ -1200,6 +1299,8 @@ open MLAS;
                        in the location bound to the function's identifier. *)
                    store(name,outFile,indent,locals,freeVars,cellVars,[],[(name,targetName)]@env@globalBindings)
                  end
+
+               (*| dec(bindvalrec(wildcardpat,func(idnum,L))) = []*)
 
                | dec(bindvalrec(_,_)) =
                  (TextIO.output(TextIO.stdOut,"val rec construct must be val rec id = (fn <x> => ...)\n");

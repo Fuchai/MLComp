@@ -2,6 +2,8 @@ signature mlcomp_TOKENS =
 sig
 type ('a,'b) token
 type svalue
+val Of:  'a * 'a -> (svalue,'a) token
+val Case:  'a * 'a -> (svalue,'a) token
 val Exclaim:  'a * 'a -> (svalue,'a) token
 val SetEqual:  'a * 'a -> (svalue,'a) token
 val Id: (string) *  'a * 'a -> (svalue,'a) token
