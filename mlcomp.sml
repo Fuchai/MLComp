@@ -115,6 +115,7 @@ open MLAS;
        | nameOf(raisexp(e)) = "raisexp"
        | nameOf(negate(e)) = "negate"
        | nameOf(ifthen(e1,e2,e3)) = "ifthen"
+       | nameOf(caseof(e,L)) = "caseof"
        | nameOf(whiledo(e1,e2)) = "whiledo"
        | nameOf(func(idnum,L)) = "func"^Int.toString(idnum);
 
@@ -188,6 +189,12 @@ open MLAS;
                       printList(writeMatch,indent^"   ",L);
                       println(indent^"])"))
 
+               | writeExp(indent, caseof(exp, L))=
+                     (println(indent^"caseof(");
+                      writeExp(indent^"   ",exp);
+                      println("\n"^indent^", [");
+                      printList(writeMatch,indent^"   ",L);
+                      println(indent^"])"))
 
                | writeExp(indent,ifthen(exp1,exp2,exp3)) =
                      (println(indent^"ifthen(");
@@ -197,6 +204,7 @@ open MLAS;
                       println("\n"^indent^",");
                       writeExp(indent^"   ",exp3);
                       println("\n"^indent^")"))
+
 
                | writeExp(indent,whiledo(exp1,exp2)) =
                      (println(indent^"whiledo(");
@@ -318,7 +326,7 @@ open MLAS;
                | con(func(idnum,matchlist)) = ["code(anon@"^Int.toString(idnum)^")"]
                | con(handlexp(t1,L)) = (con t1) @ ((List.foldr (fn (match(pat,exp),y) => (patConsts pat) @ (con exp) @ y) []) L)
                | con(tuplecon(L)) = List.foldr (fn (x,y) => (con x) @ y) [] L
-
+               | con(caseof(t1,L)) = (con t1) @ ((List.foldr (fn (match(pat,exp),y) => (patConsts pat) @ (con exp) @ y) []) L)
                | con(str(s)) = [s]
                | con(other) =
                   (TextIO.output(TextIO.stdOut, "\nAttempt to get constants for expression not currently supported!\n");
@@ -396,6 +404,15 @@ open MLAS;
                   ())
 
                | bindingsOf(raisexp(exp),bindings,scope) = bindingsOf(exp,bindings,scope)
+               | bindingsOf(caseof(exp,L),bindings,scope)=
+                   (bindingsOf(exp,bindings,scope);
+                    List.map (fn match(pat,exp) =>
+                       let val patBs = patBindings(pat,scope+1)
+                       in
+                         bindingsOf(exp,patBs@bindings,scope+1);
+                         List.map (fn b => addIt(b,theBindings)) patBs
+                       end) L;
+                    ())
                | bindingsOf(ifthen(exp1,exp2,exp3), bindings, scope) = (bindingsOf(exp1, bindings, scope); bindingsOf(exp2, bindings, scope); bindingsOf(exp3,bindings,scope))
                | bindingsOf(negate(exp),bindings,scope) = bindingsOf(exp,bindings,scope)
                | bindingsOf(expsequence(L),bindings,scope) = (List.map (fn x => (bindingsOf(x,bindings,scope))) L; ())
@@ -818,6 +835,26 @@ open MLAS;
            TextIO.output(outFile, indent^"BINARY_SUBTRACT\n")
          end
 
+       | codegen(caseof(e,matchlist),outFile,indent,consts,locals,freeVars,cellVars,globals,env,globalBindings,scope) =
+           let val L0 = nextLabel()
+               val excmpIdx = lookupIndex("excmatch",cmp_op)
+           in
+               codegen(e,outFile,indent,consts,locals,freeVars,cellVars,globals,env,globalBindings,scope);
+               List.map (fn (match(pat,exp)) =>
+                          let val endpatternlab = nextLabel()
+                          in
+                            TextIO.output(outFile,indent^"DUP_TOP\n");
+                            let val newbindings = patmatch(pat,outFile,indent,consts,locals,freeVars,cellVars,globals,env,scope+1,endpatternlab)
+                            in
+                              TextIO.output(outFile,indent^"POP_TOP\n");
+                              codegen(exp,outFile,indent,consts,locals,freeVars,cellVars,globals,newbindings@env,globalBindings,scope+1);
+                              TextIO.output(outFile,indent^"JUMP_FORWARD "^L0^"\n");
+                              TextIO.output(outFile,endpatternlab^":\n")
+                            end
+                          end) matchlist;
+               TextIO.output(outFile,L0^":\n")
+           end
+
        | codegen(ifthen(e_if, e_then, e_else),outFile,indent,consts,locals,freeVars,cellVars,globals,env,globalBindings,scope) =
           let val then_label=nextLabel()
               val else_label=nextLabel()
@@ -1071,6 +1108,7 @@ open MLAS;
                | functions(raisexp(e)) = (functions e)
                | functions(negate(e)) = (functions e)
                | functions(ifthen(e1,e2,e3))=(functions e1; functions e2; functions e3)
+               | functions(caseof(exp,L)) = (functions exp; List.map (fn (match(pat,exp)) => functions exp) L; ())
 
                | functions(expsequence(L)) = (List.map (fn x => (functions x)) L; ())
                | functions(letdec(d,L2)) =
@@ -1171,7 +1209,7 @@ open MLAS;
                | functions(raisexp(e)) = (functions e)
                | functions(negate(e)) = (functions e)
                | functions(ifthen(e1,e2,e3)) =  (functions e1; functions e2; functions e3)
-
+               | functions(caseof(exp,L)) = (functions exp;List.map (fn (match(pat,exp)) => functions exp) L; ())
 
                | functions(expsequence(L)) = (List.map (fn x => (functions x)) L; ())
 
