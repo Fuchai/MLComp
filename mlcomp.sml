@@ -363,7 +363,7 @@ open MLAS;
        | patBindings(infixpat("::",pat1,pat2),scope) = (patBindings(pat1,scope)) @ (patBindings(pat2,scope))
        | patBindings(tuplepat(L),scope) = List.foldr (fn (x,y) => patBindings(x,scope)@y) [] L
        | patBindings(listpat(L),scope)= List.foldr (fn (x,y) => patBindings(x,scope)@y) [] L
-       | patBindigns(wildcardpat)=[]
+       | patBindings(wildcardpat,scope)=[]
        | patBindings(_,scope) =
          (TextIO.output(TextIO.stdOut, "\nAttempt to gather locals for unsupported pattern!\n");
           raise Unimplemented)
@@ -1010,7 +1010,8 @@ open MLAS;
          end
 
        | patmatch(wildcardpat,outFile,indent,consts,locals,freeVars,cellVars,globals,env,scope,label)=
-          []
+          (TextIO.output(outFile,indent^"POP_TOP \n");
+          [])
 
        | patmatch(infixpat("::",pat1,pat2),outFile,indent,consts,locals,freeVars,cellVars,globals,env,scope,label) =
          let val zeroIndex = lookupIndex("0",consts)
@@ -1036,8 +1037,8 @@ open MLAS;
          (TextIO.output(outFile,indent^"SELECT_TUPLE "^Int.toString(length(L))^"\n");
           List.foldl (fn (x,y) => patmatch(x,outFile,indent,consts,locals,freeVars,cellVars,globals,env,scope,label) @ y) [] L)
 
-        | patmatch(tuplepat(L),outFile,indent,consts,locals,freeVars,cellVars,globals,env,scope,label) =
-            (TextIO.output(outFile,indent^"SELECT_TUPLE "^Int.toString(length(L))^"\n");
+        | patmatch(listpat(L),outFile,indent,consts,locals,freeVars,cellVars,globals,env,scope,label) =
+            (TextIO.output(outFile,indent^"SELECT_FUNLIST \n");
              List.foldl (fn (x,y) => patmatch(x,outFile,indent,consts,locals,freeVars,cellVars,globals,env,scope,label) @ y) [] L)
 
        | patmatch(_,outFile,indent,consts,locals,freeVars,cellVars,globals,env,scope,label) =
